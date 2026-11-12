@@ -98,21 +98,23 @@
   const DATE_MID = 541;
   const VENUE_MID = 617, VENUE_X = 92, VENUE_MAX_X = 575;
   const ROWS = [696, 751, 809, 866, 924, 982, 1041, 1100, 1159, 1218, 1278];
+  const ROWS12 = [695, 748, 802, 855, 908, 961, 1014, 1068, 1121, 1174, 1228, 1281];
   const NAME_X = 205, TAG_RIGHT_X = 612;
   const STORE_KEY = "nbcc-teamlist-v1";
 
   const $ = id => document.getElementById(id);
   const canvas = $("canvas"), ctx = canvas.getContext("2d");
-  const template = new Image();
+  const template = new Image(), template12 = new Image();
 
   // ---------- build player inputs ----------
   const playersEl = $("players");
-  for (let i = 1; i <= 11; i++) {
+  for (let i = 1; i <= 12; i++) {
     const n = document.createElement("span"); n.textContent = i;
-    const inp = document.createElement("input"); inp.id = "p" + i; inp.placeholder = "Player " + i;
+    const inp = document.createElement("input"); inp.id = "p" + i;
+    inp.placeholder = i === 12 ? "12th player (optional)" : "Player " + i;
     playersEl.append(n, inp);
   }
-  const playerInputs = [...Array(11)].map((_, i) => $("p" + (i + 1)));
+  const playerInputs = [...Array(12)].map((_, i) => $("p" + (i + 1)));
 
   function refreshRoleSelects() {
     for (const sel of [$("captain"), $("vice"), $("keeper")]) {
@@ -201,7 +203,9 @@
   function render() {
     const d = getData();
     ctx.textBaseline = "alphabetic";
-    ctx.drawImage(template, 0, 0, 1024, 1536);
+    const twelve = (d.players[11] || "").trim() !== "";
+    ctx.drawImage(twelve ? template12 : template, 0, 0, 1024, 1536);
+    const rows = twelve ? ROWS12 : ROWS;
 
     // Line 1: grade
     const grade = (d.grade || "").toUpperCase() + (d.round ? ` (RND ${d.round})` : "");
@@ -245,16 +249,17 @@
     d.players.forEach((raw, i) => {
       const name = raw.trim();
       if (!name) return;
-      const mid = ROWS[i];
+      if (i >= rows.length) return;
+      const mid = rows[i];
       const tags = [];
       if (d.captain === String(i + 1)) tags.push("(C)");
       if (d.vice === String(i + 1)) tags.push("(VC)");
       if (d.keeper === String(i + 1)) tags.push("(WK)");
       const tag = tags.join(" ");
-      setFont("RobotoBold", 36);
+      setFont("RobotoBold", twelve ? 34 : 36);
       const tagW = tag ? ctx.measureText(tag).width : 0;
       if (tag) text(tag, TAG_RIGHT_X - tagW, baselineForMid(mid), NAME);
-      fitFont(name, "RobotoBold", 37, TAG_RIGHT_X - NAME_X - (tag ? tagW + 16 : 0));
+      fitFont(name, "RobotoBold", twelve ? 35 : 37, TAG_RIGHT_X - NAME_X - (tag ? tagW + 16 : 0));
       text(name, NAME_X, baselineForMid(mid), NAME);
     });
   }
@@ -349,6 +354,7 @@
   load();
   Promise.all([
     new Promise((res, rej) => { template.onload = res; template.onerror = rej; template.src = "template.jpg"; }),
+    new Promise((res, rej) => { template12.onload = res; template12.onerror = rej; template12.src = "template12.jpg"; }),
     document.fonts.load('64px "RobotoBlack"'), document.fonts.load('40px "RobotoBold"'), document.fonts.load('44px "RobotoBlackItalic"')
   ]).then(render).catch(err => alert("Couldn't load the template or fonts: " + err));
 })();
