@@ -23,6 +23,9 @@
   label { display: block; font-size: .85rem; font-weight: 600; margin: 10px 0 4px; }
   input, select { width: 100%; padding: 9px 10px; border: 1px solid #c9d4cc; border-radius: 8px; font: inherit; background: #fff; }
   input:focus, select:focus { outline: 2px solid var(--yellow); border-color: var(--green-2); }
+  .row-grade { display: grid; grid-template-columns: 1fr 96px; gap: 10px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .row3 select { padding: 9px 4px; font-size: .9rem; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .players { display: grid; grid-template-columns: 28px 1fr; gap: 6px 8px; align-items: center; }
   .players span { background: var(--green); color: #fff; font-weight: 700; text-align: center; border-radius: 5px; padding: 6px 0; font-size: .85rem; }
@@ -46,8 +49,15 @@
 <main>
   <form class="card" id="form" autocomplete="off" onsubmit="return false">
     <h2>Match</h2>
-    <label for="grade">Grade</label>
-    <input id="grade" value="Fourth Grade">
+    <div class="row-grade">
+      <div><label for="grade">Grade</label>
+        <select id="grade">
+          <option>Second Grade</option>
+          <option>Third Grade</option>
+          <option selected>Fourth Grade</option>
+        </select></div>
+      <div><label for="round">Round</label><input id="round" type="number" min="1" max="99" inputmode="numeric" placeholder="e.g. 10"></div>
+    </div>
     <label for="opponent">Opponent</label>
     <input id="opponent" placeholder="e.g. Saints">
     <div class="row2">
@@ -59,8 +69,9 @@
 
     <h2>Team</h2>
     <div class="players" id="players"></div>
-    <div class="row2">
+    <div class="row3">
       <div><label for="captain">Captain</label><select id="captain"></select></div>
+      <div><label for="vice">Vice-captain</label><select id="vice"></select></div>
       <div><label for="keeper">Wicketkeeper</label><select id="keeper"></select></div>
     </div>
 
@@ -69,7 +80,7 @@
       <button type="button" class="secondary" id="share" hidden>Share…</button>
       <button type="button" class="ghost" id="clear">Clear team</button>
     </div>
-    <p class="hint">Your last entries are remembered on this device, so next week you only change what's different.</p>
+    <p class="hint">Each grade's team is remembered separately on this device. Switch grade to load that team.</p>
   </form>
 
   <section class="preview">
@@ -104,10 +115,10 @@
   const playerInputs = [...Array(11)].map((_, i) => $("p" + (i + 1)));
 
   function refreshRoleSelects() {
-    for (const sel of [$("captain"), $("keeper")]) {
+    for (const sel of [$("captain"), $("vice"), $("keeper")]) {
       const keep = sel.value;
-      sel.innerHTML = '<option value="">— none —</option>' + playerInputs.map((inp, i) =>
-        `<option value="${i + 1}">${i + 1}. ${escapeHtml(inp.value.trim() || "(empty)")}</option>`).join("");
+      sel.innerHTML = '<option value="">None</option>' + playerInputs.map((inp, i) =>
+        `<option value="${i + 1}">${escapeHtml(inp.value.trim() || "Player " + (i + 1))}</option>`).join("");
       sel.value = keep;
     }
   }
@@ -182,8 +193,8 @@
   // ---------- render ----------
   function getData() {
     return {
-      grade: $("grade").value, opponent: $("opponent").value, date: $("date").value, time: $("time").value,
-      venue: $("venue").value, players: playerInputs.map(i => i.value), captain: $("captain").value, keeper: $("keeper").value
+      grade: $("grade").value, round: $("round").value.trim(), opponent: $("opponent").value, date: $("date").value, time: $("time").value,
+      venue: $("venue").value, players: playerInputs.map(i => i.value), captain: $("captain").value, vice: $("vice").value, keeper: $("keeper").value
     };
   }
 
@@ -193,7 +204,7 @@
     ctx.drawImage(template, 0, 0, 1024, 1536);
 
     // Line 1: grade
-    const grade = (d.grade || "").toUpperCase();
+    const grade = (d.grade || "").toUpperCase() + (d.round ? ` (RND ${d.round})` : "");
     fitFont(grade, "RobotoBlack", 64, TITLE_MAX_X - TITLE_X);
     text(grade, TITLE_X, LINE1_BASE, WHITE, SHADOW);
 
@@ -237,6 +248,7 @@
       const mid = ROWS[i];
       const tags = [];
       if (d.captain === String(i + 1)) tags.push("(C)");
+      if (d.vice === String(i + 1)) tags.push("(VC)");
       if (d.keeper === String(i + 1)) tags.push("(WK)");
       const tag = tags.join(" ");
       setFont("RobotoBold", 36);
@@ -247,28 +259,58 @@
     });
   }
 
-  // ---------- persistence ----------
-  function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(getData())); } catch (e) {}
-  }
-  function load() {
-    let s = null;
-    try { s = JSON.parse(localStorage.getItem(STORE_KEY) || "null"); } catch (e) {}
-    if (s) {
-      for (const k of ["grade", "opponent", "time", "venue"]) if (s[k] != null) $(k).value = s[k];
-      (s.players || []).forEach((v, i) => { if (playerInputs[i]) playerInputs[i].value = v; });
+  // ---------- persistence (one saved team per grade) ----------
+  const STORE_KEY_V2 = "nbcc-teamlist-v2";
+  let store = { lastGrade: "Fourth Grade", grades: {} };
+  try {
+    const raw = localStorage.getItem(STORE_KEY_V2);
+    if (raw) store = JSON.parse(raw);
+    else {                                   // migrate data saved by the first version
+      const old = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
+      if (old) store.grades["Fourth Grade"] = old;
     }
-    // Default to next Sunday unless the saved date is still upcoming
-    const today = new Date().toISOString().slice(0, 10);
-    $("date").value = s && s.date && s.date >= today ? s.date : nextSunday();
-    refreshRoleSelects();
-    if (s) { $("captain").value = s.captain || ""; $("keeper").value = s.keeper || ""; }
+  } catch (e) {}
+  let currentGrade = store.lastGrade || "Fourth Grade";
+
+  function save() {
+    const d = getData();
+    store.grades[currentGrade] = d;
+    store.lastGrade = currentGrade;
+    try { localStorage.setItem(STORE_KEY_V2, JSON.stringify(store)); } catch (e) {}
   }
+  function fillForm(grade) {
+    const s = store.grades[grade] || {};
+    $("grade").value = grade;
+    $("round").value = s.round || "";
+    $("opponent").value = s.opponent || "";
+    $("time").value = s.time || "08:00";
+    $("venue").value = s.venue || "";
+    playerInputs.forEach((inp, i) => { inp.value = (s.players || [])[i] || ""; });
+    // Default to next Sunday unless the saved date is still upcoming
+    const t = new Date();
+    const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+    $("date").value = s.date && s.date >= today ? s.date : nextSunday();
+    refreshRoleSelects();
+    $("captain").value = s.captain || "";
+    $("vice").value = s.vice || "";
+    $("keeper").value = s.keeper || "";
+  }
+  function load() { fillForm(currentGrade); }
+
+  $("grade").addEventListener("change", e => {
+    e.stopPropagation();
+    save();                                  // keep the grade we're leaving (saved under currentGrade)
+    currentGrade = $("grade").value;
+    fillForm(currentGrade);
+    save(); render();
+  });
 
   // ---------- output ----------
   function fileName() {
     const opp = ($("opponent").value || "TBA").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    return `TeamList_${$("date").value || "TBC"}_vs_${opp}.png`;
+    const grade = $("grade").value.replace(/\s+/g, "_");
+    const rnd = $("round").value.trim() ? `_Rnd${$("round").value.trim()}` : "";
+    return `TeamList_${grade}${rnd}_${$("date").value || "TBC"}_vs_${opp}.png`;
   }
   const toBlob = () => new Promise(res => canvas.toBlob(res, "image/png"));
 
@@ -293,7 +335,7 @@
 
   $("clear").addEventListener("click", () => {
     playerInputs.forEach(i => i.value = "");
-    $("captain").value = ""; $("keeper").value = "";
+    $("captain").value = ""; $("vice").value = ""; $("keeper").value = "";
     refreshRoleSelects(); render(); save();
   });
 
